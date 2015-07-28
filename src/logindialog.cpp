@@ -27,6 +27,7 @@
 #include <QNetworkRequest>
 #include <QNetworkCookie>
 #include <QNetworkCookieJar>
+#include <QNetworkProxyFactory>
 #include <QRegExp>
 #include <QSettings>
 #include <QUrl>
@@ -70,7 +71,7 @@ LoginDialog::LoginDialog(std::unique_ptr<Application> app) :
     login_manager_ = std::make_unique<QNetworkAccessManager>();
     QNetworkReply *leagues_reply = login_manager_->get(QNetworkRequest(QUrl(QString(POE_LEAGUE_LIST_URL))));
     connect(leagues_reply, SIGNAL(finished()), this, SLOT(OnLeaguesRequestFinished()));
-
+    connect(ui->proxyCheckBox, SIGNAL(clicked(bool)), this, SLOT(OnProxyCheckBoxClicked(bool)));
     connect(ui->loginButton, SIGNAL(clicked()), this, SLOT(OnLoginButtonClicked()));
     connect(&update_checker_, &UpdateChecker::UpdateAvailable, [&](){
         // Only annoy the user once at the login dialog window, even if it's opened for more than an hour
@@ -96,7 +97,7 @@ void LoginDialog::OnLeaguesRequestFinished() {
         // But let's do our best and try to add at least some leagues!
         // It's in case GGG's API is broken and suddenly starts returning empty pages,
         // which of course will never happen.
-        leagues_ = { "1 Month Flashback (IC006)", "1 Month Flashback HC (IC007)", "Standard", "Hardcore" };
+        leagues_ = { "Warbands", "Tempest", "Standard", "Hardcore" };
     } else {
         for (auto &league : doc)
             leagues_.push_back(league["id"].GetString());
@@ -127,6 +128,12 @@ void LoginDialog::OnSteamDialogClosed() {
     DisplayError("Login was not completed");
 }
 
+// All characters except + should be handled by QUrlQuery, see http://doc.qt.io/qt-5/qurlquery.html#encoding
+static QString EncodeSpecialCharacters(QString s) {
+    s.replace("+", "%2b");
+    return s;
+}
+
 void LoginDialog::OnLoginPageFinished() {
     QNetworkReply *reply = qobject_cast<QNetworkReply *>(QObject::sender());
     if (reply->error()) {
@@ -144,8 +151,8 @@ void LoginDialog::OnLoginPageFinished() {
             }
 
             QUrlQuery query;
-            query.addQueryItem("login_email", ui->emailLineEdit->text());
-            query.addQueryItem("login_password", ui->passwordLineEdit->text());
+            query.addQueryItem("login_email", EncodeSpecialCharacters(ui->emailLineEdit->text()));
+            query.addQueryItem("login_password", EncodeSpecialCharacters(ui->passwordLineEdit->text()));
             query.addQueryItem("hash", QString(hash.c_str()));
             query.addQueryItem("login", "Login");
 
@@ -230,11 +237,16 @@ void LoginDialog::OnMainPageFinished() {
     close();
 }
 
+void LoginDialog::OnProxyCheckBoxClicked(bool checked) {
+  QNetworkProxyFactory::setUseSystemConfiguration(checked);
+}
+
 void LoginDialog::LoadSettings() {
     QSettings settings(settings_path_.c_str(), QSettings::IniFormat);
     session_id_ = settings.value("session_id", "").toString();
     ui->sessionIDLineEdit->setText(session_id_);
     ui->rembmeCheckBox->setChecked(settings.value("remember_me_checked").toBool());
+    ui->proxyCheckBox->setChecked(settings.value("use_system_proxy_checked").toBool());
 
     if (ui->rembmeCheckBox->isChecked())
         ui->loginTabs->setCurrentIndex(LOGIN_SESSIONID);
@@ -244,6 +256,8 @@ void LoginDialog::LoadSettings() {
         ui->leagueComboBox->addItem(saved_league_);
         ui->leagueComboBox->setEnabled(true);
     }
+
+    QNetworkProxyFactory::setUseSystemConfiguration(ui->proxyCheckBox->isChecked());
 }
 
 void LoginDialog::SaveSettings() {
@@ -256,6 +270,7 @@ void LoginDialog::SaveSettings() {
         settings.setValue("league", "");
     }
     settings.setValue("remember_me_checked", ui->rembmeCheckBox->isChecked() && !session_id_.isEmpty());
+    settings.setValue("use_system_proxy_checked", ui->proxyCheckBox->isChecked());
 }
 
 void LoginDialog::DisplayError(const QString &error) {
@@ -271,4 +286,10 @@ LoginDialog::~LoginDialog() {
 
     if (mw)
         delete mw;
+}
+
+bool LoginDialog::event(QEvent *e) {
+    if (e->type() == QEvent::LayoutRequest)
+        setFixedSize(sizeHint());
+    return QDialog::event(e);
 }

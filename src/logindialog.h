@@ -49,8 +49,11 @@ public slots:
     void OnLoginPageFinished();
     void OnLoggedIn();
     void OnMainPageFinished();
+    void OnProxyCheckBoxClicked(bool);
     void OnSteamCookieReceived(const QString &cookie);
     void OnSteamDialogClosed();
+protected:
+    bool event(QEvent *e);
 private:
     void SaveSettings();
     void LoadSettings();
