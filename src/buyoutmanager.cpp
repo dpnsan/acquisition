@@ -28,12 +28,12 @@
 #include "rapidjson/error/en.h"
 
 #include "application.h"
-#include "datamanager.h"
+#include "datastore.h"
 #include "rapidjson_util.h"
 #include "util.h"
 
-BuyoutManager::BuyoutManager(DataManager &data_manager) :
-    data_manager_(data_manager),
+BuyoutManager::BuyoutManager(DataStore &data) :
+    data_(data),
     save_needed_(false)
 {
     Load();
@@ -104,6 +104,8 @@ std::string BuyoutManager::Serialize(const std::map<std::string, Buyout> &buyout
         Util::RapidjsonAddConstString(&item, "type", BuyoutTypeAsTag[buyout.type], alloc);
         Util::RapidjsonAddConstString(&item, "currency", CurrencyAsTag[buyout.currency], alloc);
 
+        item.AddMember("inherited", buyout.inherited, alloc);
+
         rapidjson::Value name(bo.first.c_str(), alloc);
         doc.AddMember(name, item, alloc);
     }
@@ -137,6 +139,9 @@ void BuyoutManager::Deserialize(const std::string &data, std::map<std::string, B
         if (object.HasMember("last_update")){
             bo.last_update = QDateTime::fromTime_t(object["last_update"].GetInt());
         }
+        bo.inherited = false;
+        if (object.HasMember("inherited"))
+            bo.inherited = object["inherited"].GetBool();
         (*buyouts)[name] = bo;
     }
 }
@@ -145,11 +150,31 @@ void BuyoutManager::Save() {
     if (!save_needed_)
         return;
     save_needed_ = false;
-    data_manager_.Set("buyouts", Serialize(buyouts_));
-    data_manager_.Set("tab_buyouts", Serialize(tab_buyouts_));
+    data_.Set("buyouts", Serialize(buyouts_));
+    data_.Set("tab_buyouts", Serialize(tab_buyouts_));
 }
 
 void BuyoutManager::Load() {
-    Deserialize(data_manager_.Get("buyouts"), &buyouts_);
-    Deserialize(data_manager_.Get("tab_buyouts"), &tab_buyouts_);
+    Deserialize(data_.Get("buyouts"), &buyouts_);
+    Deserialize(data_.Get("tab_buyouts"), &tab_buyouts_);
+}
+
+void BuyoutManager::MigrateItem(const Item &item) {
+    std::string old_hash = item.old_hash();
+    std::string hash = item.hash();
+    auto it = buyouts_.find(old_hash);
+    if (it != buyouts_.end()) {
+        buyouts_[hash] = it->second;
+        buyouts_.erase(it);
+        save_needed_ = true;
+    }
+}
+
+bool Buyout::operator==(const Buyout&o) const {
+    static const double eps = 1e-6;
+    return std::fabs(o.value - value) < eps && o.type == type && o.currency == currency && o.inherited == inherited;
+}
+
+bool Buyout::operator!=(const Buyout &o) const {
+    return !(o == *this);
 }

@@ -22,24 +22,17 @@
 #include <string>
 #include <vector>
 
-class Application;
-struct CurrencyUpdate;
-struct sqlite3;
+#include "currencymanager.h"
 
-class DataManager {
+class DataStore {
 public:
-    DataManager(const std::string &filename_);
-    ~DataManager();
-    void Set(const std::string &key, const std::string &value);
-    std::string Get(const std::string &key, const std::string &default_value = "");
-    void InsertCurrencyUpdate(const CurrencyUpdate &update);
-    std::vector<CurrencyUpdate> GetAllCurrency();
-    void SetBool(const std::string &key, bool value);
-    bool GetBool(const std::string &key, bool default_value = false);
-    static std::string MakeFilename(const std::string &name, const std::string &league);
-private:
-    void CreateTable(const std::string &name, const std::string &fields);
-
-    std::string filename_;
-    sqlite3 *db_;
+    virtual ~DataStore() {};
+    virtual void Set(const std::string &key, const std::string &value) = 0;
+    virtual std::string Get(const std::string &key, const std::string &default_value = "") = 0;
+    virtual void InsertCurrencyUpdate(const CurrencyUpdate &update) = 0;
+    virtual std::vector<CurrencyUpdate> GetAllCurrency() = 0;
+    virtual void SetBool(const std::string &key, bool value) = 0;
+    virtual bool GetBool(const std::string &key, bool default_value = false) = 0;
+    virtual void SetInt(const std::string &key, int value) = 0;
+    virtual int GetInt(const std::string &key, int default_value = 0) = 0;
 };

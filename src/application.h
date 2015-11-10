@@ -26,13 +26,13 @@
 
 class QNetworkReply;
 
-class DataManager;
+class DataStore;
 class ItemsManager;
 class BuyoutManager;
 class Shop;
 class CurrencyManager;
 
-class Application : QObject {
+class Application : public QObject {
     Q_OBJECT
 public:
     Application();
@@ -40,28 +40,24 @@ public:
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
     // Should be called by login dialog after login
-    void InitLogin(std::unique_ptr<QNetworkAccessManager> login_manager, const std::string &league, const std::string &email);
+    void InitLogin(std::unique_ptr<QNetworkAccessManager> login_manager, const std::string &league, const std::string &email, bool mock_data = false);
     const std::string &league() const { return league_; }
     const std::string &email() const { return email_; }
-    const Items &items() const { return items_; }
     ItemsManager &items_manager() { return *items_manager_; }
-    DataManager &data_manager() const { return *data_manager_; }
-    DataManager &sensitive_data_manager() const { return *sensitive_data_manager_; }
+    DataStore &data() const { return *data_; }
+    DataStore &sensitive_data() const { return *sensitive_data_; }
     BuyoutManager &buyout_manager() const { return *buyout_manager_; }
     QNetworkAccessManager &logged_in_nm() const { return *logged_in_nm_; }
-    CurrencyManager &currency_manager() const { return *currency_manager_;}
-    const std::vector<std::string> &tabs() const { return tabs_; }
     Shop &shop() const { return *shop_; }
+    CurrencyManager &currency_manager() const { return *currency_manager_; }
 public slots:
-    void OnItemsRefreshed(const Items &items, const std::vector<std::string> &tabs, bool initial_refresh = false);
+    void OnItemsRefreshed(bool initial_refresh);
 private:
-    Items items_;
-    std::vector<std::string> tabs_;
     std::string league_;
     std::string email_;
-    std::unique_ptr<DataManager> data_manager_;
+    std::unique_ptr<DataStore> data_;
     // stores sensitive data that you'd rather not share, like control.poe.xyz.is secret URL
-    std::unique_ptr<DataManager> sensitive_data_manager_;
+    std::unique_ptr<DataStore> sensitive_data_;
     std::unique_ptr<BuyoutManager> buyout_manager_;
     std::unique_ptr<Shop> shop_;
     std::unique_ptr<QNetworkAccessManager> logged_in_nm_;

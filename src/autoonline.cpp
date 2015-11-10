@@ -28,13 +28,13 @@
 
 #include <QNetworkRequest>
 #include "QsLog.h"
-#include "datamanager.h"
+#include "datastore.h"
 #include "version.h"
 
 // check for PoE running every minute
 const int kOnlineCheckInterval = 60 * 1000;
 
-AutoOnline::AutoOnline(DataManager &data, DataManager &sensitive_data):
+AutoOnline::AutoOnline(DataStore &data, DataStore &sensitive_data) :
     data_(data),
     sensitive_data_(sensitive_data),
     enabled_(data_.GetBool("online_enabled")),
@@ -91,20 +91,25 @@ static bool IsPoeRunning() {
 #endif
 }
 
+void AutoOnline::SendOnlineUpdate(bool online) {
+    // online: true  -> Go online
+    // online: false -> Go offline
+    std::string url = url_;
+    if(!online) {
+        url += "/offline";
+    }
+    QNetworkRequest request(QUrl(url.c_str()));
+    QByteArray data;
+    request.setHeader(QNetworkRequest::UserAgentHeader, (std::string("Acquisition ") + VERSION_NAME).c_str());
+    nm_.post(request, data);
+}
+
 void AutoOnline::Check() {
     bool running = IsPoeRunning();
 
-    std::string url = url_;
-    if (!running)
-        url += "/offline";
-
     if (running || previous_status_) {
-        QNetworkRequest request(QUrl(url.c_str()));
-        QByteArray data;
-        request.setHeader(QNetworkRequest::UserAgentHeader, (std::string("Acquisition ") + VERSION_NAME).c_str());
-        nm_.post(request, data);
+        SendOnlineUpdate(running);
     }
-
     previous_status_ = running;
 
     emit Update(running);

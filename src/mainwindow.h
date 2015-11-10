@@ -24,6 +24,7 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QPushButton>
+#include <QCloseEvent>
 
 #ifdef Q_OS_WIN
 #include <QWinTaskbarButton>
@@ -91,6 +92,7 @@ public slots:
     void OnCollapseAll();
     void OnUpdateAvailable();
     void OnOnlineUpdate(bool online);
+    void OnUploadFinished();
 private slots:
     void on_actionForum_shop_thread_triggered();
     void on_actionCopy_shop_data_to_clipboard_triggered();
@@ -104,13 +106,11 @@ private slots:
     void on_actionAutomatically_refresh_online_status_triggered();
     void on_actionList_currency_triggered();
     void on_actionExport_currency_triggered();
+    void on_uploadTooltipButton_clicked();
 
 private:
     void UpdateCurrentBucket();
     void UpdateCurrentItem();
-    void UpdateCurrentItemMinimap();
-    void UpdateCurrentItemIcon(const QImage &image);
-    void UpdateCurrentItemProperties();
     void UpdateCurrentBuyout();
     void NewSearch();
     void InitializeLogging();
@@ -123,6 +123,7 @@ private:
     void UpdateBuyoutWidgets(const Buyout &bo);
     void ExpandCollapse(TreeState state);
     void UpdateOnlineGui();
+    void closeEvent(QCloseEvent*);
 
     std::unique_ptr<Application> app_;
     Ui::MainWindow *ui;
@@ -142,6 +143,7 @@ private:
     QPushButton update_button_;
     AutoOnline auto_online_;
     QLabel online_label_;
+    QNetworkAccessManager *network_manager_;
 #ifdef Q_OS_WIN32
     QWinTaskbarButton *taskbar_button_;
 #endif

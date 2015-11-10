@@ -26,7 +26,7 @@ SOURCES += \
     src/buyoutmanager.cpp \
     src/column.cpp \
     src/currencymanager.cpp \
-    src/datamanager.cpp \
+    src/sqlitedatastore.cpp \
     src/filesystem.cpp \
     src/filters.cpp \
     src/flowlayout.cpp \
@@ -36,10 +36,12 @@ SOURCES += \
     src/items_model.cpp \
     src/itemsmanager.cpp \
     src/itemsmanagerworker.cpp \
+    src/itemtooltip.cpp \
     src/logindialog.cpp \
     src/logpanel.cpp \
     src/main.cpp \
     src/mainwindow.cpp \
+    src/memorydatastore.cpp \
     src/modlist.cpp \
     src/modsfilter.cpp \
     src/porting.cpp \
@@ -53,6 +55,7 @@ SOURCES += \
     src/verticalscrollarea.cpp \
     test/testdata.cpp \
     test/testitem.cpp \
+    test/testitemsmanager.cpp \
     test/testmain.cpp \
     test/testshop.cpp \
     test/testutil.cpp
@@ -65,7 +68,8 @@ HEADERS += \
     src/buyoutmanager.h \
     src/column.h \
     src/currencymanager.h \
-    src/datamanager.h \
+    src/datastore.h \
+    src/sqlitedatastore.h \
     src/filesystem.h \
     src/filters.h \
     src/flowlayout.h \
@@ -76,15 +80,18 @@ HEADERS += \
     src/items_model.h \
     src/itemsmanager.h \
     src/itemsmanagerworker.h \
+    src/itemtooltip.h \
     src/logindialog.h \
     src/logpanel.h \
     src/mainwindow.h \
+    src/memorydatastore.h \
     src/modlist.h \
     src/modsfilter.h \
     src/porting.h \
     src/rapidjson_util.h \
     src/replytimeout.h \
     src/search.h \
+    src/selfdestructingreply.h \
     src/shop.h \
     src/steamlogindialog.h \
     src/updatechecker.h \
@@ -94,6 +101,7 @@ HEADERS += \
     src/verticalscrollarea.h \
     test/testdata.h \
     test/testitem.h \
+    test/testitemsmanager.h \
     test/testmain.h \
     test/testshop.h \
     test/testutil.h

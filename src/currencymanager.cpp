@@ -23,7 +23,7 @@
 #include "QsLog.h"
 
 #include "application.h"
-#include "datamanager.h"
+#include "datastore.h"
 #include "buyoutmanager.h"
 #include "currencymanager.h"
 #include "itemsmanager.h"
@@ -33,7 +33,7 @@
 
 CurrencyManager::CurrencyManager(Application &app):
     app_(app),
-    data_(app.data_manager())
+    data_(app.data())
 {
     if (data_.Get("currency_base", "").empty())
         InitCurrency();
@@ -47,7 +47,7 @@ CurrencyManager::~CurrencyManager() {
 
 void CurrencyManager::Update() {
     ClearCurrency();
-    for (auto &item : app_.items()) {
+    for (auto &item : app_.items_manager().items()) {
         ParseSingleItem(*item);
     }
     UpdateExaltedValue();

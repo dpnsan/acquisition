@@ -23,23 +23,24 @@
 #include <QObject>
 #include <QTimer>
 
-class DataManager;
+class DataStore;
 
 class AutoOnline : public QObject {
     Q_OBJECT
 public:
-    AutoOnline(DataManager &data, DataManager &sensitive_data);
+    AutoOnline(DataStore &data, DataStore &sensitive_data);
     void SetUrl(const std::string &url);
     void SetEnabled(bool enabled);
     bool enabled() { return enabled_; }
     bool IsUrlSet() { return !url_.empty(); }
+    void SendOnlineUpdate(bool online);
 public slots:
     void Check();
 signals:
     void Update(bool running);
 private:
-    DataManager &data_;
-    DataManager &sensitive_data_;
+    DataStore &data_;
+    DataStore &sensitive_data_;
     bool enabled_;
     std::string url_;
     bool previous_status_;

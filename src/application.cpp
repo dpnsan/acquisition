@@ -22,7 +22,8 @@
 #include <QNetworkAccessManager>
 
 #include "buyoutmanager.h"
-#include "datamanager.h"
+#include "sqlitedatastore.h"
+#include "memorydatastore.h"
 #include "filesystem.h"
 #include "itemsmanager.h"
 #include "currencymanager.h"
@@ -36,27 +37,31 @@ Application::~Application() {
         buyout_manager_->Save();
 }
 
-void Application::InitLogin(std::unique_ptr<QNetworkAccessManager> login_manager, const std::string &league, const std::string &email) {
+void Application::InitLogin(std::unique_ptr<QNetworkAccessManager> login_manager, const std::string &league, const std::string &email,
+        bool mock_data) {
     league_ = league;
     email_ = email;
     logged_in_nm_ = std::move(login_manager);
 
-    std::string data_file = DataManager::MakeFilename(email, league);
-    data_manager_ = std::make_unique<DataManager>(Filesystem::UserDir() + "/data/" + data_file);
-    sensitive_data_manager_ = std::make_unique<DataManager>(Filesystem::UserDir() + "/sensitive_data/" + data_file);
-    buyout_manager_ = std::make_unique<BuyoutManager>(*data_manager_);
+    if (mock_data) {
+        // This is used in tests
+        data_ = std::make_unique<MemoryDataStore>();
+        sensitive_data_ = std::make_unique<MemoryDataStore>();
+    } else {
+        std::string data_file = SqliteDataStore::MakeFilename(email, league);
+        data_ = std::make_unique<SqliteDataStore>(Filesystem::UserDir() + "/data/" + data_file);
+        sensitive_data_ = std::make_unique<SqliteDataStore>(Filesystem::UserDir() + "/sensitive_data/" + data_file);
+    }
+    buyout_manager_ = std::make_unique<BuyoutManager>(*data_);
     shop_ = std::make_unique<Shop>(*this);
     items_manager_ = std::make_unique<ItemsManager>(*this);
     currency_manager_ = std::make_unique<CurrencyManager>(*this);
-    connect(items_manager_.get(), SIGNAL(ItemsRefreshed(Items, std::vector<std::string>, bool)),
-        this, SLOT(OnItemsRefreshed(Items, std::vector<std::string>, bool)));
+    connect(items_manager_.get(), &ItemsManager::ItemsRefreshed, this, &Application::OnItemsRefreshed);
     items_manager_->Start();
     items_manager_->Update();
 }
 
-void Application::OnItemsRefreshed(const Items &items, const std::vector<std::string> &tabs, bool initial_refresh) {
-    items_ = items;
-    tabs_ = tabs;
+void Application::OnItemsRefreshed(bool initial_refresh) {
     currency_manager_->Update();
     shop_->ExpireShopData();
     if (!initial_refresh && shop_->auto_update())

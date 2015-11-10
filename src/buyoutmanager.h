@@ -105,13 +105,27 @@ struct Buyout {
     BuyoutType type;
     Currency currency;
     QDateTime last_update;
+    bool inherited = false;
+    bool operator==(const Buyout &o) const;
+    bool operator!=(const Buyout &o) const;
+    Buyout() :
+        value(0),
+        type(BUYOUT_TYPE_NONE),
+        currency(CURRENCY_NONE)
+    {}
+    Buyout(double value_, BuyoutType type_, Currency currency_, QDateTime last_update_) :
+        value(value_),
+        type(type_),
+        currency(currency_),
+        last_update(last_update_)
+    {}
 };
 
-class DataManager;
+class DataStore;
 
 class BuyoutManager {
 public:
-    explicit BuyoutManager(DataManager &data_manager);
+    explicit BuyoutManager(DataStore &data);
     void Set(const Item &item, const Buyout &buyout);
     Buyout Get(const Item &item) const;
     void Delete(const Item &item);
@@ -124,11 +138,13 @@ public:
 
     void Save();
     void Load();
+
+    void MigrateItem(const Item &item);
 private:
     std::string Serialize(const std::map<std::string, Buyout> &buyouts);
     void Deserialize(const std::string &data, std::map<std::string, Buyout> *buyouts);
 
-    DataManager &data_manager_;
+    DataStore &data_;
     std::map<std::string, Buyout> buyouts_;
     std::map<std::string, Buyout> tab_buyouts_;
     bool save_needed_;

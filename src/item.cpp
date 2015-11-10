@@ -37,11 +37,10 @@ static std::string item_unique_properties(const rapidjson::Value &json, const st
     if (!json.HasMember(name_p))
         return "";
     std::string result;
-    for (auto prop_it = json[name_p].Begin(); prop_it != json[name_p].End(); ++prop_it) {
-        auto &prop = *prop_it;
+    for (auto &prop : json[name_p]) {
         result += std::string(prop["name"].GetString()) + "~";
-        for (auto value_it = prop["values"].Begin(); value_it != prop["values"].End(); ++value_it)
-            result += std::string((*value_it)[0].GetString()) + "~";
+        for (auto &value : prop["values"])
+            result += std::string(value[0].GetString()) + "~";
     }
     return result;
 }
@@ -55,11 +54,18 @@ static std::string fixup_name(const std::string &name) {
     return name;
 }
 
+Item::Item(const std::string &name, const ItemLocation &location) :
+    name_(name),
+    location_(location),
+    hash_(Util::Md5(name)) // Unique enough for tests
+{}
+
 Item::Item(const rapidjson::Value &json) :
     location_(ItemLocation(json)),
     name_(fixup_name(json["name"].GetString())),
     typeLine_(fixup_name(json["typeLine"].GetString())),
     corrupted_(json["corrupted"].GetBool()),
+    identified_(json["identified"].GetBool()),
     w_(json["w"].GetInt()),
     h_(json["h"].GetInt()),
     frameType_(json["frameType"].GetInt()),
@@ -96,8 +102,12 @@ Item::Item(const rapidjson::Value &json) :
             ItemProperty property;
             property.name = name;
             property.display_mode = prop["displayMode"].GetInt();
-            for (auto &value : prop["values"])
-                property.values.push_back(value[0].GetString());
+            for (auto &value : prop["values"]) {
+                ItemPropertyValue v;
+                v.str = value[0].GetString();
+                v.type = value[1].GetInt();
+                property.values.push_back(v);
+            }
             text_properties_.push_back(property);
         }
     }
@@ -107,7 +117,10 @@ Item::Item(const rapidjson::Value &json) :
             std::string name = req["name"].GetString();
             std::string value = req["values"][0][0].GetString();
             requirements_[name] = std::atoi(value.c_str());
-            text_requirements_.push_back({ name, value });
+            ItemPropertyValue v;
+            v.str = value;
+            v.type = req["values"][0][1].GetInt();
+            text_requirements_.push_back({ name, v });
         }
     }
 
@@ -148,24 +161,7 @@ Item::Item(const rapidjson::Value &json) :
         socket_groups_.push_back(current_group);
     }
 
-    std::string unique(name_ + "~" + typeLine_ + "~");
-
-    if (json.HasMember("explicitMods"))
-        for (auto mod_it = json["explicitMods"].Begin(); mod_it != json["explicitMods"].End(); ++mod_it)
-            unique += std::string(mod_it->GetString()) + "~";
-
-    if (json.HasMember("implicitMods"))
-        for (auto mod_it = json["implicitMods"].Begin(); mod_it != json["implicitMods"].End(); ++mod_it)
-            unique += std::string(mod_it->GetString()) + "~";
-
-    unique += item_unique_properties(json, "properties") + "~";
-    unique += item_unique_properties(json, "additionalProperties") + "~";
-
-    if (json.HasMember("sockets"))
-        for (auto socket_it = json["sockets"].Begin(); socket_it != json["sockets"].End(); ++socket_it)
-            unique += std::to_string((*socket_it)["group"].GetInt()) + "~" + (*socket_it)["attr"].GetString() + "~";
-
-    hash_ = Util::Md5(unique);
+    CalculateHash(json);
 
     count_ = 1;
     if (properties_.find("Stack Size") != properties_.end()) {
@@ -213,4 +209,33 @@ double Item::eDPS() const {
 void Item::GenerateMods(const rapidjson::Value &json) {
     for (auto &generator : mod_generators)
         generator->Generate(json, &mod_table_);
+}
+
+void Item::CalculateHash(const rapidjson::Value &json) {
+    std::string unique_old(name_ + "~" + typeLine_ + "~");
+    std::string unique_new(std::string(json["name"].GetString()) + "~" + json["typeLine"].GetString() + "~");
+
+    std::string unique_common;
+
+    if (json.HasMember("explicitMods"))
+        for (auto &mod : json["explicitMods"])
+            unique_common += std::string(mod.GetString()) + "~";
+
+    if (json.HasMember("implicitMods"))
+        for (auto &mod : json["implicitMods"])
+            unique_common += std::string(mod.GetString()) + "~";
+
+    unique_common += item_unique_properties(json, "properties") + "~";
+    unique_common += item_unique_properties(json, "additionalProperties") + "~";
+
+    if (json.HasMember("sockets"))
+        for (auto &socket : json["sockets"])
+            unique_common += std::to_string(socket["group"].GetInt()) + "~" + socket["attr"].GetString() + "~";
+
+    unique_old += unique_common;
+    unique_new += unique_common;
+
+    old_hash_ = Util::Md5(unique_old);
+    unique_new += "~" + location_.GetUniqueHash();
+    hash_ = Util::Md5(unique_new);
 }

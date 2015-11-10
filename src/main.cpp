@@ -22,6 +22,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
+#include <QFontDatabase>
 #include <QLocale>
 #include "QsLog.h"
 #include "QsLogDest.h"
@@ -66,6 +67,8 @@ int main(int argc, char *argv[])
     QApplication a(argc, argv);
     Filesystem::Init();
 
+    QFontDatabase::addApplicationFont(":/fonts/Fontin-SmallCaps.ttf");
+
     QCommandLineParser parser;
     QCommandLineOption option_test("test"), option_data_dir("data-dir", "Where to save Acquisition data.", "data-dir");
     parser.addOption(option_test);
@@ -89,8 +92,8 @@ int main(int argc, char *argv[])
     logger.addDestination(debugDestination);
     logger.addDestination(fileDestination);
 
-    QLOG_INFO() << "--------------------------------------------------------------------------------";
-    QLOG_INFO() << "Built with Qt" << QT_VERSION_STR << "running on" << qVersion();
+    QLOG_DEBUG() << "--------------------------------------------------------------------------------";
+    QLOG_DEBUG() << "Built with Qt" << QT_VERSION_STR << "running on" << qVersion();
 
     LoginDialog login(std::make_unique<Application>());
     login.show();

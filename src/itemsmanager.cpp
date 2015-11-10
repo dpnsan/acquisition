@@ -19,20 +19,12 @@
 
 #include "itemsmanager.h"
 
-#include <QNetworkReply>
-#include <QSignalMapper>
-#include <QTimer>
-#include <QUrlQuery>
-#include <QTimer>
 #include <QThread>
-#include <iostream>
 #include <stdexcept>
-#include "QsLog.h"
-#include "rapidjson/document.h"
-#include "rapidjson/error/en.h"
 
 #include "application.h"
-#include "datamanager.h"
+#include "buyoutmanager.h"
+#include "datastore.h"
 #include "itemsmanagerworker.h"
 #include "porting.h"
 #include "rapidjson_util.h"
@@ -42,12 +34,13 @@
 
 ItemsManager::ItemsManager(Application &app) :
     auto_update_timer_(std::make_unique<QTimer>()),
-    data_manager_(app.data_manager()),
+    data_(app.data()),
+    bo_manager_(app.buyout_manager()),
     shop_(app.shop()),
     app_(app)
 {
-    auto_update_interval_ = std::stoi(data_manager_.Get("autoupdate_interval", "30"));
-    auto_update_ = data_manager_.GetBool("autoupdate", true);
+    auto_update_interval_ = std::stoi(data_.Get("autoupdate_interval", "30"));
+    auto_update_ = data_.GetBool("autoupdate", true);
     SetAutoUpdateInterval(auto_update_interval_);
     connect(auto_update_timer_.get(), SIGNAL(timeout()), this, SLOT(OnAutoRefreshTimer()));
 }
@@ -72,8 +65,49 @@ void ItemsManager::OnStatusUpdate(const CurrentStatusUpdate &status) {
     emit StatusUpdate(status);
 }
 
+void ItemsManager::PropagateTabBuyouts() {
+    for (auto &item_ptr : items_) {
+        auto &item = *item_ptr;
+        auto &bo = app_.buyout_manager();
+        std::string hash = item.location().GetUniqueHash();
+        bool item_bo_exists = bo.Exists(item);
+        bool tab_bo_exists = bo.ExistsTab(hash);
+
+        Buyout item_bo, tab_bo;
+        if (item_bo_exists)
+            item_bo = bo.Get(item);
+        if (tab_bo_exists)
+            tab_bo = bo.GetTab(hash);
+
+        // The logic below is quite complicated and probably should be simplified.
+        // One day.
+
+        // We update inherited attribute here because it later gets copied to the item if
+        // its buyout doesn't match exactly the tab buyout
+        tab_bo.inherited = true;
+
+        // Don't do anything to the item if it has a personal buyout set
+        if (item_bo_exists && !item_bo.inherited)
+            continue;
+        // If item has an inherited buyout but tab is clear, delete it
+        if (item_bo_exists && !tab_bo_exists) {
+            bo.Delete(item);
+        // If tab buyout exists and item's buyout doesn't match it, update it
+        // Only update when it doesn't match to preserve last_update
+        } else if (tab_bo_exists && (!item_bo_exists || item_bo != tab_bo)) {
+            tab_bo.last_update = QDateTime::currentDateTime();
+            bo.Set(item, tab_bo);
+        }
+    }
+}
+
 void ItemsManager::OnItemsRefreshed(const Items &items, const std::vector<std::string> &tabs, bool initial_refresh) {
-    emit ItemsRefreshed(items, tabs, initial_refresh);
+    items_ = items;
+    tabs_ = tabs;
+    MigrateBuyouts();
+    PropagateTabBuyouts();
+
+    emit ItemsRefreshed(initial_refresh);
 }
 
 void ItemsManager::Update() {
@@ -81,7 +115,7 @@ void ItemsManager::Update() {
 }
 
 void ItemsManager::SetAutoUpdate(bool update) {
-    data_manager_.SetBool("autoupdate", update);
+    data_.SetBool("autoupdate", update);
     auto_update_ = update;
     if (!auto_update_)
         auto_update_timer_->stop();
@@ -91,7 +125,7 @@ void ItemsManager::SetAutoUpdate(bool update) {
 }
 
 void ItemsManager::SetAutoUpdateInterval(int minutes) {
-    data_manager_.Set("autoupdate_interval", std::to_string(minutes));
+    data_.Set("autoupdate_interval", std::to_string(minutes));
     auto_update_interval_ = minutes;
     if (auto_update_)
         auto_update_timer_->start(auto_update_interval_ * 60 * 1000);
@@ -99,4 +133,15 @@ void ItemsManager::SetAutoUpdateInterval(int minutes) {
 
 void ItemsManager::OnAutoRefreshTimer() {
     Update();
+}
+
+void ItemsManager::MigrateBuyouts() {
+    int db_version = data_.GetInt("db_version");
+    // Don't migrate twice
+    if (db_version == 2)
+        return;
+    for (auto &item : items_)
+        bo_manager_.MigrateItem(*item);
+    bo_manager_.Save();
+    data_.SetInt("db_version", 2);
 }

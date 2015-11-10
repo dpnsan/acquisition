@@ -46,10 +46,13 @@
 #include "imagecache.h"
 #include "item.h"
 #include "itemlocation.h"
+#include "itemtooltip.h"
 #include "itemsmanager.h"
 #include "logpanel.h"
 #include "modsfilter.h"
+#include "replytimeout.h"
 #include "search.h"
+#include "selfdestructingreply.h"
 #include "shop.h"
 #include "util.h"
 #include "verticalscrollarea.h"
@@ -61,7 +64,8 @@ MainWindow::MainWindow(std::unique_ptr<Application> app):
     ui(new Ui::MainWindow),
     current_search_(nullptr),
     search_count_(0),
-    auto_online_(app_->data_manager(), app_->sensitive_data_manager())
+    auto_online_(app_->data(), app_->sensitive_data()),
+    network_manager_(new QNetworkAccessManager)
 {
 #ifdef Q_OS_WIN32
     createWinId();
@@ -82,8 +86,7 @@ MainWindow::MainWindow(std::unique_ptr<Application> app):
     connect(image_network_manager_, SIGNAL(finished(QNetworkReply*)),
             this, SLOT(OnImageFetched(QNetworkReply*)));
 
-    connect(&app_->items_manager(), SIGNAL(ItemsRefreshed(Items, std::vector<std::string>)),
-        this, SLOT(OnItemsRefreshed()));
+    connect(&app_->items_manager(), &ItemsManager::ItemsRefreshed, this, &MainWindow::OnItemsRefreshed);
     connect(&app_->items_manager(), &ItemsManager::StatusUpdate, this, &MainWindow::OnStatusUpdate);
     connect(&app_->shop(), &Shop::StatusUpdate, this, &MainWindow::OnStatusUpdate);
     connect(&update_checker_, &UpdateChecker::UpdateAvailable, this, &MainWindow::OnUpdateAvailable);
@@ -102,7 +105,6 @@ void MainWindow::InitializeUi() {
     statusBar()->addWidget(status_bar_label_);
     ui->itemLayout->setAlignment(Qt::AlignTop);
     ui->itemLayout->setAlignment(ui->minimapLabel, Qt::AlignHCenter);
-    ui->itemLayout->setAlignment(ui->typeLineLabel, Qt::AlignHCenter);
     ui->itemLayout->setAlignment(ui->nameLabel, Qt::AlignHCenter);
     ui->itemLayout->setAlignment(ui->imageLabel, Qt::AlignHCenter);
     ui->itemLayout->setAlignment(ui->locationLabel, Qt::AlignHCenter);
@@ -166,6 +168,16 @@ void MainWindow::InitializeUi() {
     // resize columns when a tab is expanded/collapsed
     connect(ui->treeView, SIGNAL(collapsed(const QModelIndex&)), this, SLOT(ResizeTreeColumns()));
     connect(ui->treeView, SIGNAL(expanded(const QModelIndex&)), this, SLOT(ResizeTreeColumns()));
+
+    ui->propertiesLabel->setStyleSheet("QLabel { background-color: black; color: #7f7f7f; padding: 10px; font-size: 17px; }");
+    ui->propertiesLabel->setFont(QFont("Fontin SmallCaps"));
+    ui->itemNameFirstLine->setFont(QFont("Fontin SmallCaps"));
+    ui->itemNameSecondLine->setFont(QFont("Fontin SmallCaps"));
+    ui->itemNameFirstLine->setAlignment(Qt::AlignCenter);
+    ui->itemNameSecondLine->setAlignment(Qt::AlignCenter);
+
+    ui->itemTooltipWidget->hide();
+    ui->uploadTooltipButton->hide();
 }
 
 void MainWindow::ExpandCollapse(TreeState state) {
@@ -226,6 +238,7 @@ void MainWindow::OnBuyoutChange() {
         else
             app_->buyout_manager().SetTab(tab, bo);
     }
+    app_->items_manager().PropagateTabBuyouts();
     // refresh treeView to immediately reflect price changes
     ui->treeView->model()->layoutChanged();
     ResizeTreeColumns();
@@ -307,12 +320,12 @@ void MainWindow::OnImageFetched(QNetworkReply *reply) {
     image_cache_->Set(url, image);
 
     if (current_item_ && (url == current_item_->icon() || url == POE_WEBCDN + current_item_->icon()))
-        UpdateCurrentItemIcon(image);
+        GenerateItemIcon(*current_item_, image, ui);
 }
 
 void MainWindow::OnSearchFormChange() {
     app_->buyout_manager().Save();
-    current_search_->Activate(app_->items(), ui->treeView);
+    current_search_->Activate(app_->items_manager().items(), ui->treeView);
     connect(ui->treeView->selectionModel(), SIGNAL(currentChanged(const QModelIndex&, const QModelIndex&)),
             this, SLOT(OnTreeChange(const QModelIndex&, const QModelIndex&)));
     ui->treeView->reset();
@@ -424,37 +437,33 @@ void MainWindow::NewSearch() {
 }
 
 void MainWindow::UpdateCurrentBucket() {
-    ui->typeLineLabel->hide();
     ui->imageLabel->hide();
     ui->minimapLabel->hide();
     ui->locationLabel->hide();
-    ui->propertiesLabel->hide();
+    ui->itemTooltipWidget->hide();
+    ui->uploadTooltipButton->hide();
 
     ui->nameLabel->setText(current_bucket_.location().GetHeader().c_str());
     ui->nameLabel->show();
 }
 
 void MainWindow::UpdateCurrentItem() {
-    ui->typeLineLabel->show();
+    app_->buyout_manager().Save();
+
     ui->imageLabel->show();
     ui->minimapLabel->show();
     ui->locationLabel->show();
-    ui->propertiesLabel->show();
+    ui->itemTooltipWidget->show();
+    ui->uploadTooltipButton->show();
+    ui->nameLabel->hide();
 
-    app_->buyout_manager().Save();
-    ui->typeLineLabel->setText(current_item_->typeLine().c_str());
-    if (current_item_->name().empty())
-        ui->nameLabel->hide();
-    else {
-        ui->nameLabel->setText(current_item_->name().c_str());
-        ui->nameLabel->show();
-    }
     ui->imageLabel->setText("Loading...");
     ui->imageLabel->setStyleSheet("QLabel { background-color : rgb(12, 12, 43); color: white }");
     ui->imageLabel->setFixedSize(QSize(current_item_->w(), current_item_->h()) * PIXELS_PER_SLOT);
 
-    UpdateCurrentItemProperties();
-    UpdateCurrentItemMinimap();
+    // Everything except item image now lives in itemtooltip.cpp
+    // in future should move everything tooltip-related there
+    GenerateItemTooltip(*current_item_, ui);
 
     std::string icon = current_item_->icon();
     if (icon.size() && icon[0] == '/')
@@ -462,138 +471,9 @@ void MainWindow::UpdateCurrentItem() {
     if (!image_cache_->Exists(icon))
         image_network_manager_->get(QNetworkRequest(QUrl(icon.c_str())));
     else
-        UpdateCurrentItemIcon(image_cache_->Get(icon));
+        GenerateItemIcon(*current_item_, image_cache_->Get(icon), ui);
 
     ui->locationLabel->setText(current_item_->location().GetHeader().c_str());
-}
-
-void MainWindow::UpdateCurrentItemProperties() {
-    std::vector<std::string> sections;
-
-    std::string properties_text;
-    bool first_prop = true;
-    for (auto &property : current_item_->text_properties()) {
-        if (!first_prop)
-            properties_text += "<br>";
-        first_prop = false;
-        if (property.display_mode == 3) {
-            QString format(property.name.c_str());
-            for (auto &value : property.values)
-                format = format.arg(value.c_str());
-            properties_text += format.toStdString();
-        } else {
-            properties_text += property.name;
-            if (property.values.size()) {
-                if (property.name.size() > 0)
-                    properties_text += ": ";
-                bool first_val = true;
-                for (auto &value : property.values) {
-                    if (!first_val)
-                        properties_text += ", ";
-                    first_val = false;
-                    properties_text += value;
-                }
-            }
-        }
-    }
-    if (properties_text.size() > 0)
-        sections.push_back(properties_text);
-
-    std::string requirements_text;
-    bool first_req = true;
-    for (auto &requirement : current_item_->text_requirements()) {
-        if (!first_req)
-            requirements_text += ", ";
-        first_req = false;
-        requirements_text += requirement.name + ": " + requirement.value;
-    }
-    if (requirements_text.size() > 0)
-        sections.push_back("Requires " + requirements_text);
-
-    auto &mods = current_item_->text_mods();
-    for (auto &mod_type : ITEM_MOD_TYPES) {
-        std::string mod_list = Util::ModListAsString(mods.at(mod_type));
-        if (!mod_list.empty())
-            sections.push_back(mod_list);
-    }
-
-    std::string text;
-    bool first = true;
-    for (auto &s : sections) {
-        if (!first)
-            text += "<hr>";
-        first = false;
-        text += s;
-    }
-    ui->propertiesLabel->setText(text.c_str());
-}
-
-void MainWindow::UpdateCurrentItemIcon(const QImage &image) {
-    QPixmap pixmap = QPixmap::fromImage(image);
-    QPainter painter(&pixmap);
-
-    static const QImage link_h(":/sockets/linkH.png");
-    static const QImage link_v(":/sockets/linkV.png");
-    ItemSocket prev = { 255, '-' };
-    size_t i = 0;
-    for (auto &socket : current_item_->text_sockets()) {
-        bool link = socket.group == prev.group;
-        QImage socket_image(":/sockets/" + QString(socket.attr) + ".png");
-        if (current_item_->w() == 1) {
-            painter.drawImage(0, PIXELS_PER_SLOT * i, socket_image);
-            if (link)
-                painter.drawImage(16, PIXELS_PER_SLOT * i - 19, link_v);
-        } else /* w == 2 */ {
-            int row = i / 2;
-            int column = i % 2;
-            if (row % 2 == 1)
-                column = 1 - column;
-            painter.drawImage(PIXELS_PER_SLOT * column, PIXELS_PER_SLOT * row, socket_image);
-            if (link) {
-                if (i == 1 || i == 3 || i == 5) {
-                    // horizontal link
-                    painter.drawImage(
-                        PIXELS_PER_SLOT - LINKH_WIDTH / 2,
-                        row * PIXELS_PER_SLOT + PIXELS_PER_SLOT / 2 - LINKH_HEIGHT / 2,
-                        link_h
-                    );
-                } else if (i == 2) {
-                    painter.drawImage(
-                        PIXELS_PER_SLOT * 1.5 - LINKV_WIDTH / 2,
-                        row * PIXELS_PER_SLOT - LINKV_HEIGHT / 2,
-                        link_v
-                    );
-                } else if (i == 4) {
-                    painter.drawImage(
-                        PIXELS_PER_SLOT / 2 - LINKV_WIDTH / 2,
-                        row * PIXELS_PER_SLOT - LINKV_HEIGHT / 2,
-                        link_v
-                    );
-                } else {
-                    QLOG_ERROR() << "No idea how to draw link for" << current_item_->PrettyName().c_str();
-                }
-            }
-        }
-
-        prev = socket;
-        ++i;
-    }
-
-    ui->imageLabel->setPixmap(pixmap);
-}
-
-void MainWindow::UpdateCurrentItemMinimap() {
-    QPixmap pixmap(MINIMAP_SIZE, MINIMAP_SIZE);
-    pixmap.fill(QColor("transparent"));
-
-    QPainter painter(&pixmap);
-    painter.setBrush(QBrush(QColor(0x0c, 0x0b, 0x0b)));
-    painter.drawRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
-    const ItemLocation &location = current_item_->location();
-    painter.setBrush(QBrush(location.socketed() ? Qt::blue : Qt::red));
-    QRectF rect = current_item_->location().GetRect();
-    painter.drawRect(rect);
-    ui->minimapLabel->setPixmap(pixmap);
 }
 
 void MainWindow::ResetBuyoutWidgets() {
@@ -629,7 +509,7 @@ void MainWindow::UpdateCurrentBuyout() {
 void MainWindow::OnItemsRefreshed() {
     int tab = 0;
     for (auto search : searches_) {
-        search->FilterItems(app_->items());
+        search->FilterItems(app_->items_manager().items());
         tab_bar_->setTabText(tab++, search->GetCaption());
     }
     OnSearchFormChange();
@@ -680,7 +560,7 @@ void MainWindow::OnOnlineUpdate(bool online) {
         online_label_.setText("Online");
     } else {
         online_label_.setStyleSheet("color: red");
-        online_label_.setText("Offline");
+online_label_.setText("Offline");
     }
 }
 
@@ -739,4 +619,61 @@ void MainWindow::on_actionList_currency_triggered() {
 }
 void MainWindow::on_actionExport_currency_triggered() {
     app_->currency_manager().ExportCurrency();
+}
+
+void MainWindow::closeEvent(QCloseEvent *event) {
+    auto_online_.SendOnlineUpdate(false);
+}
+
+void MainWindow::on_uploadTooltipButton_clicked() {
+    ui->uploadTooltipButton->setDisabled(true);
+    ui->uploadTooltipButton->setText("Uploading...");
+
+    QPixmap pixmap(ui->itemTooltipWidget->size());
+    ui->itemTooltipWidget->render(&pixmap);
+
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    pixmap.save(&buffer, "PNG"); // writes pixmap into bytes in PNG format
+
+    QNetworkRequest request(QUrl("https://api.imgur.com/3/upload/"));
+    request.setRawHeader("Authorization", "Client-ID d6d2d8a0437a90f");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+    QByteArray data = "image=" + QUrl::toPercentEncoding(bytes.toBase64());
+    QNetworkReply *reply = network_manager_->post(request, data);
+    new QReplyTimeout(reply, kImgurUploadTimeout);
+    connect(reply, &QNetworkReply::finished, this, &MainWindow::OnUploadFinished);
+}
+
+void MainWindow::OnUploadFinished() {
+    ui->uploadTooltipButton->setDisabled(false);
+    ui->uploadTooltipButton->setText("Upload to imgur");
+
+    SelfDestructingReply reply(qobject_cast<QNetworkReply *>(QObject::sender()));
+    QByteArray bytes = reply->readAll();
+
+    rapidjson::Document doc;
+    doc.Parse(bytes.constData());
+
+    if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("status") || !doc["status"].IsNumber()) {
+        QLOG_ERROR() << "Imgur API returned invalid data (or timed out): " << bytes;
+        reply->deleteLater();
+        return;
+    }
+    if (doc["status"].GetInt() != 200) {
+        QLOG_ERROR() << "Imgur API returned status!=200: " << bytes;
+        reply->deleteLater();
+        return;
+    }
+    if (!doc.HasMember("data") || !doc["data"].HasMember("link") || !doc["data"]["link"].IsString()) {
+        QLOG_ERROR() << "Imgur API returned malformed reply: " << bytes;
+        reply->deleteLater();
+        return;
+    }
+    std::string url = doc["data"]["link"].GetString();
+    QApplication::clipboard()->setText(url.c_str());
+    QLOG_INFO() << "Image successfully uploaded, the URL is" << url.c_str() << "It also was copied to your clipboard.";
+
+    reply->deleteLater();
 }

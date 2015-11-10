@@ -28,7 +28,8 @@
 struct CurrentStatusUpdate;
 class QThread;
 class Application;
-class DataManager;
+class BuyoutManager;
+class DataStore;
 class ItemsManagerWorker;
 class Shop;
 
@@ -48,6 +49,9 @@ public:
     void SetAutoUpdate(bool update);
     int auto_update_interval() const { return auto_update_interval_; }
     bool auto_update() const { return auto_update_; }
+    const Items &items() const { return items_; }
+    const std::vector<std::string> &tabs() const { return tabs_; }
+    void PropagateTabBuyouts();
 public slots:
     // called by auto_update_timer_
     void OnAutoRefreshTimer();
@@ -56,9 +60,11 @@ public slots:
     void OnItemsRefreshed(const Items &items, const std::vector<std::string> &tabs, bool initial_refresh);
 signals:
     void UpdateSignal();
-    void ItemsRefreshed(const Items &items, const std::vector<std::string> &tabs, bool initial_refresh = false);
+    void ItemsRefreshed(bool initial_refresh);
     void StatusUpdate(const CurrentStatusUpdate &status);
 private:
+    void MigrateBuyouts();
+
     // should items be automatically refreshed
     bool auto_update_;
     // items will be automatically updated every X minutes
@@ -66,7 +72,10 @@ private:
     std::unique_ptr<QTimer> auto_update_timer_;
     std::unique_ptr<ItemsManagerWorker> worker_;
     std::unique_ptr<QThread> thread_;
-    DataManager &data_manager_;
+    DataStore &data_;
+    BuyoutManager &bo_manager_;
     Shop &shop_;
     Application &app_;
+    Items items_;
+    std::vector<std::string> tabs_;
 };

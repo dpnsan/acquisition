@@ -28,8 +28,9 @@
 #include "QsLog.h"
 
 #include "application.h"
-#include "datamanager.h"
 #include "buyoutmanager.h"
+#include "datastore.h"
+#include "itemsmanager.h"
 #include "porting.h"
 #include "util.h"
 #include "mainwindow.h"
@@ -45,30 +46,36 @@ Shop::Shop(Application &app) :
     shop_data_outdated_(true),
     submitting_(false)
 {
-    threads_ = Util::StringSplit(app_.data_manager().Get("shop"), ';');
-    auto_update_ = app_.data_manager().GetBool("shop_update", true);
-    shop_template_ = app_.data_manager().Get("shop_template");
+    threads_ = Util::StringSplit(app_.data().Get("shop"), ';');
+    auto_update_ = app_.data().GetBool("shop_update", true);
+    shop_template_ = app_.data().Get("shop_template");
     if (shop_template_.empty())
         shop_template_ = kShopTemplateItems;
+
+    connect(&app.items_manager(), &ItemsManager::ItemsRefreshed, [=]() {
+        Update();
+        if (auto_update_)
+            SubmitShopToForum();
+    });
 }
 
 void Shop::SetThread(const std::vector<std::string> &threads) {
     if (submitting_)
         return;
     threads_ = threads;
-    app_.data_manager().Set("shop", Util::StringJoin(threads, ";"));
+    app_.data().Set("shop", Util::StringJoin(threads, ";"));
     ExpireShopData();
-    app_.data_manager().Set("shop_hash", "");
+    app_.data().Set("shop_hash", "");
 }
 
 void Shop::SetAutoUpdate(bool update) {
     auto_update_ = update;
-    app_.data_manager().SetBool("shop_update", update);
+    app_.data().SetBool("shop_update", update);
 }
 
 void Shop::SetShopTemplate(const std::string &shop_template) {
     shop_template_ = shop_template;
-    app_.data_manager().Set("shop_template", shop_template);
+    app_.data().Set("shop_template", shop_template);
     ExpireShopData();
 }
 std::string Shop::SpoilerBuyout(Buyout &bo) {
@@ -91,7 +98,7 @@ void Shop::Update() {
     std::vector<AugmentedItem> aug_items;
     AugmentedItem tmp = AugmentedItem();
     //Get all buyouts to be able to sort them
-    for (auto &item : app_.items()) {
+    for (auto &item : app_.items_manager().items()) {
         tmp.item = item.get();
         tmp.bo.type = BUYOUT_TYPE_NONE;
         tmp.bo.type = BUYOUT_TYPE_NONE;
@@ -154,7 +161,7 @@ void Shop::SubmitShopToForum(bool force) {
     if (shop_data_outdated_)
         Update();
 
-    std::string previous_hash = app_.data_manager().Get("shop_hash");
+    std::string previous_hash = app_.data().Get("shop_hash");
     // Don't update the shop if it hasn't changed
     if (previous_hash == shop_hash_ && !force)
         return;
@@ -180,7 +187,7 @@ void Shop::SubmitSingleShop() {
     if (requests_completed_ == threads_.size()) {
         status.state = ProgramState::ShopCompleted;
         submitting_ = false;
-        app_.data_manager().Set("shop_hash", shop_hash_);
+        app_.data().Set("shop_hash", shop_hash_);
     } else {
         // first, get to the edit-thread page to grab CSRF token
         QNetworkReply *fetched = app_.logged_in_nm().get(QNetworkRequest(QUrl(ShopEditUrl(requests_completed_).c_str())));
